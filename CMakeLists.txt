@@ -1,7 +1,7 @@
 #This is the top MSI CMakeList File for the Build
 
 #Setting Version Number, Project Name
-cmake_minimum_required (VERSION 2.8)
+cmake_minimum_required (VERSION 3.4)
 project (msi)
 enable_language (Fortran)
 
@@ -12,21 +12,20 @@ if (NOT CMAKE_BUILD_TYPE)
       FORCE)
 endif (NOT CMAKE_BUILD_TYPE)
 
-# default installation
-#get_filename_component (default_prefix ".." ABSOLUTE)
-#set (CMAKE_INSTALL_PREFIX ${default_prefix} CACHE STRING
-#      "Choose the installation directory; by default it installs in the NORMA directory."
-#      FORCE)
-
 # FFLAGS depend on the compiler
 get_filename_component (Fortran_COMPILER_NAME ${CMAKE_Fortran_COMPILER} NAME)
-message (Fortran_COMPILER_NAME = ${Fortran_COMPILER_NAME})
 
-#unless building shared libs, then select static libs 
-# if both static and shared libs are available 
-set(CMAKE_FIND_LIBRARY_SUFFIXES ".a" ".so") 
+#unless building shared libs, then select static libs
+# if both static and shared libs are available
+set(CMAKE_FIND_LIBRARY_SUFFIXES ".a" ".so")
 if(BUILD_SHARED_LIBS)
   set(CMAKE_FIND_LIBRARY_SUFFIXES ".so" ".a")
+endif()
+
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x -Wall -Wextra")
+elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++1z -Wall -Wextra")
 endif()
 
 #Settings options for testing
@@ -35,10 +34,10 @@ include(CTest)
 #This will be set to ON by the CTest driver script (and only by that)
 option(ENABLE_TESTING "Build for CTest" OFF)
 set(MPIRUN "mpirun"
-    CACHE string 
+    CACHE string
     "the mpirun or srun executable")
 set(MPIRUN_PROCFLAG "-np"
-    CACHE string 
+    CACHE string
     "the command line flag to give process count to MPIRUN")
 
 #Doxygen generation system
@@ -47,9 +46,9 @@ if(DOXYGEN_FOUND)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in
                ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
 add_custom_target(doc
-${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
-WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-COMMENT "Generating API documentation with Doxygen" VERBATIM
+  ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  COMMENT "Generating API documentation with Doxygen" VERBATIM
 )
 endif(DOXYGEN_FOUND)
 
@@ -66,54 +65,56 @@ set(SOURCES
 )
 
 set(HEADERS
-  api/msi.h 
+  api/msi.h
+  include/msi_las.h
   include/msi_solver.h
   include/msi_petsc.h
   include/msi_trilinos.h
+  include/msi_field_storage.h
+  include/msi_field_op.h
 )
 
-set(CMAKE_MODULE_PATH 
-   ${CMAKE_MODULE_PATH} 
+set(CMAKE_MODULE_PATH
+   ${CMAKE_MODULE_PATH}
    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/api)
+list(APPEND INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/include
+                     ${CMAKE_CURRENT_SOURCE_DIR}/api)
 set(TARGET_LIB_NAME msi)
 
-find_package(Scorec QUIET REQUIRED)
-include_directories(${SCOREC_INCLUDE_DIRS})
-set(DEP_LIBS ${DEP_LIBS} ${SCOREC_LIBRARIES} )
+find_package(Scorec REQUIRED)
+list(APPEND INCLUDES ${SCOREC_INCLUDE_DIRS})
+list(APPEND DEP_LIBS ${SCOREC_LIBRARIES})
 
-if (ENABLE_TRILINOS)
-find_package(Trilinos QUIET REQUIRED)
-find_package(Boost QUIET REQUIRED)
-include_directories(${TRILINOS_INCLUDE_DIRS})
-set(DEP_LIBS ${DEP_LIBS} ${TRILINOS_LIBRARIES})
-set(DEP_LIBS ${DEP_LIBS} ${BOOST_LIBRARIES})
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DMSI_TRILINOS")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DMSI_TRILINOS")
-set(TARGET_LIB_NAME ${TARGET_LIB_NAME}_trilinos)
+if(ENABLE_TRILINOS)
+  find_package(Trilinos QUIET REQUIRED)
+  find_package(Boost QUIET REQUIRED)
+  list(APPEND INCLUDES ${TRILINOS_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS})
+  list(APPEND DEP_LIBS ${TILINOS_LIBRARIES} ${BOOST_LIBRARIES})
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DMSI_TRILINOS")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DMSI_TRILINOS")
+  set(TARGET_LIB_NAME ${TARGET_LIB_NAME}_trilinos)
 else()
   set(ENABLE_PETSC "ON")
 endif()
 
-if (ENABLE_PETSC)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DMSI_PETSC")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DMSI_PETSC")
-find_package(Hdf5 QUIET REQUIRED)
-set(DEP_LIBS ${DEP_LIBS} ${HDF5_LIBRARIES} )
-find_package(Petsc QUIET REQUIRED)
-include_directories(${PETSC_INCLUDE_DIRS})
-set(DEP_LIBS ${DEP_LIBS} ${PETSC_LIBRARIES} )
+if(ENABLE_PETSC)
+  find_package(Hdf5 REQUIRED)
+  find_package(PETSC REQUIRED)
+  list(APPEND INCLUDES ${HDF5_INCLUDE_DIRS} ${PETSC_INCLUDE_DIRS})
+  list(APPEND DEP_LIBS ${HDF5_LIBS} ${PETSC_LIBS})
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DMSI_PETSC")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DMSI_PETSC")
 endif()
 
 if(ENABLE_COMPLEX)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DPETSC_USE_COMPLEX")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPETSC_USE_COMPLEX")
-set(TARGET_LIB_NAME ${TARGET_LIB_NAME}_complex)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DPETSC_USE_COMPLEX")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPETSC_USE_COMPLEX")
+  set(TARGET_LIB_NAME ${TARGET_LIB_NAME}_complex)
 endif()
 
 add_library(${TARGET_LIB_NAME} ${SOURCES})
+target_include_directories(${TARGET_LIB_NAME} PUBLIC ${INCLUDES})
 target_link_libraries(${TARGET_LIB_NAME} ${DEP_LIBS})
 
 INSTALL(FILES ${HEADERS} DESTINATION include)
@@ -122,11 +123,11 @@ INSTALL(TARGETS ${TARGET_LIB_NAME}
       ARCHIVE DESTINATION lib)
 
 if (ENABLE_TESTING)
-if (ENABLE_PETSC)
-add_executable(petsc test/petsc/main.cc)
-target_link_libraries(petsc ${DEP_LIBS})
-target_link_libraries(petsc ${TARGET_LIB_NAME})
-INSTALL(TARGETS petsc RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)  
+  if (ENABLE_PETSC)
+  add_executable(petsc test/petsc/main.cc)
+  target_link_libraries(petsc ${DEP_LIBS})
+  target_link_libraries(petsc ${TARGET_LIB_NAME})
+  INSTALL(TARGETS petsc RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 endif()
 if (ENABLE_TRILINOS)
     add_executable(epetra test/epetra/main.cc)
@@ -145,8 +146,7 @@ message("ENV_FLAGS = $ENV{FFLAGS}")
 message("CMAKE_C_FLAGS = ${CMAKE_C_FLAGS}")
 message("CMAKE_CXX_FLAGS = ${CMAKE_CXX_FLAGS}")
 message("CMAKE_Fortran_COMPILER_INIT = ${CMAKE_Fortran_COMPILER_INIT}")
-message("CMAKE_Fortran_COMPILER_FULLPATH =
-${CMAKE_Fortran_COMPILER_FULLPATH}")
+message("CMAKE_Fortran_COMPILER_FULLPATH = ${CMAKE_Fortran_COMPILER_FULLPATH}")
 message("CMAKE_Fortran_COMPILER = ${CMAKE_Fortran_COMPILER}")
 message("CMAKE_Fortran_FLAGS = ${CMAKE_Fortran_FLAGS}")
 message("CMAKE_INSTALL_PREFIX = ${CMAKE_INSTALL_PREFIX}")

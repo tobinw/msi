@@ -11,7 +11,7 @@
 #         lib/*.a
 
 macro(scorecLibCheck libs isRequired)
-  foreach(lib ${libs}) 
+  foreach(lib ${libs})
     unset(scoreclib CACHE)
     find_library(scoreclib "${lib}" PATHS ${SCOREC_LIB_DIR})
     if(scoreclib MATCHES "^scoreclib-NOTFOUND$")
@@ -61,7 +61,7 @@ set(SCOREC_LIB_NAMES
   spr
   crv
   lion
-  ph 
+  ph
   size
   )
 else()
