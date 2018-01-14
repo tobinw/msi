@@ -7,26 +7,8 @@
 #include "msi_las.h"
 #include <apf.h>
 #include <apfNumbering.h>
+#include <apfFieldData.h>
+#include <iostream>
 namespace msi
 {
-// use the underlying storage from a vector to store a field, this class receives a field, creates a parallel vector of sufficient size to store the field, copies the field data out, and replaces the underlying field data array with the underlying array from the vector
-  class FieldVec
-  {
-  public:
-    FieldVec(apf::Numbering * n_, apf::Field * f_)
-      : n(n_)
-      , f(f_)
-      , xd(true)
-    { }
-    virtual Vec * checkout() = 0;
-    virtual void restore(Vec *&) = 0;
-    virtual bool checkedOut()
-    {
-      return xd;
-    }
-  protected:
-    apf::Numbering * n;
-    apf::Field * f;
-    bool xd;
-  };
 }

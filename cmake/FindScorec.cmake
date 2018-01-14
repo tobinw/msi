@@ -28,18 +28,16 @@ macro(scorecLibCheck libs isRequired)
 endmacro(scorecLibCheck)
 
 find_library(ZOLTAN_LIBRARY zoltan)
-if (NOT EXISTS "${ZOLTAN_LIBRARY}")
-  message(FATAL ERROR "ZOLTAN library not found")
+if(NOT ZOLTAN_LIBRARY)
+  message(FATAL_ERROR "Zoltan library not found!")
 endif()
-
 find_library(PARMETIS_LIBRARY parmetis)
-if (NOT EXISTS "${PARMETIS_LIBRARY}")
-  message(FATAL ERROR "PARMETIS library not found")
+if(NOT PARMETIS_LIBRARY)
+  message(FATAL_ERROR "Parmetis library not found!")
 endif()
-
 find_library(METIS_LIBRARY metis)
-if (NOT EXISTS "${METIS_LIBRARY}")
-  message(FATAL ERROR "METIS library not found")
+if(NOT METIS_LIBRARY)
+  message(FATAL_ERROR "Metis library not found!")
 endif()
 
 set(SCOREC_LIBS "")
@@ -96,7 +94,8 @@ string(REGEX REPLACE
   SCOREC_INSTALL_DIR
   "${SCOREC_INCLUDE_DIR}")
 
-set(SCOREC_LIBRARIES ${SCOREC_LIBS} ${ZOLTAN_LIBRARY} ${PARMETIS_LIBRARY} ${METIS_LIBRARY})
+set(SCOREC_LIBRARIES ${SCOREC_LIBS})
+#${ZOLTAN_LIBRARY} ${PARMETIS_LIBRARY} ${METIS_LIBRARY})
 set(SCOREC_INCLUDE_DIRS ${SCOREC_INCLUDE_DIR})
 
 include(FindPackageHandleStandardArgs)
@@ -105,7 +104,8 @@ include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(SCOREC  DEFAULT_MSG
                                   SCOREC_LIBS SCOREC_INCLUDE_DIR)
 
-mark_as_advanced(SCOREC_INCLUDE_DIR SCOREC_LIBS ${ZOLTAN_LIBRARY} ${PARMETIS_LIBRARY} ${METIS_LIBRARY})
+mark_as_advanced(SCOREC_INCLUDE_DIR SCOREC_LIBS)
+#${ZOLTAN_LIBRARY} ${PARMETIS_LIBRARY} ${METIS_LIBRARY})
 
 set(SCOREC_LINK_LIBS "")
 foreach(lib ${SCOREC_LIB_NAMES})

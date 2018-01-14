@@ -26,19 +26,32 @@ void msi_start(msi_msh * )
 }
 void msi_finalize(msi_msh *)
 { }
-void msi_set_node_vals(msi_fld * fld, msi_ent * ent, int nd, double * dofs)
+int msi_mesh_dim(msi_msh * msh)
 {
-  apf::setComponents(fld, ent, nd, dofs);
+  return msh->getDimension();
 }
-int msi_get_node_vals(msi_fld * fld, msi_ent * ent, int nd, double * dofs)
+int msi_count_local_ents(msi_msh * msh, int dm)
 {
-  apf::getComponents(fld, ent, nd, dofs);
-  // need this in its own function
-  return apf::countComponents(fld);
+  return msh->count(dm);
 }
-int mdi_node_id(msi_num * num, msi_ent * ent, int nd)
+msi_ent * msi_get_local_ent(msi_msh * msh, int dm, int idx)
+{
+  return apf::getMdsEntity(msh,dm,idx);
+}
+int msi_node_id(msi_num * num, msi_ent * ent, int nd)
 {
   return apf::getNumber(num,ent,nd,0);
+}
+int msi_nodes_on_ent(msi_fld * fld, msi_ent * ent)
+{
+  return fld->countNodesOn(ent);
+}
+void msi_get_node_coords(msi_fld * fld, msi_ent * ent, int nd, double * xyz)
+{
+  msi_fld * crd_fld = apf::getMesh(fld)->getCoordinateField();
+  apf::Vector3 crd;
+  apf::getVector(crd_fld,ent,nd,crd);
+  crd.toArray(xyz);
 }
 void msi_node_dof_range(msi_num * num, msi_ent * ent, int nd, int * frst, int * lst_p1)
 {
@@ -47,7 +60,34 @@ void msi_node_dof_range(msi_num * num, msi_ent * ent, int nd, int * frst, int * 
   *frst = nd_id * nd_dofs;
   *lst_p1 = *frst + nd_dofs;
 }
-class PackedAXPY : public msi::FieldOp
+void msi_set_node_vals(msi_fld * fld, msi_ent * ent, int nd, double * dofs)
+{
+  apf::setComponents(fld, ent, nd, dofs);
+}
+void msi_get_node_vals(msi_fld * fld, msi_ent * ent, int nd, double * dofs)
+{
+  apf::getComponents(fld, ent, nd, dofs);
+}
+void msi_local_node_range(msi_num * num, int * frst, int * lst_p1)
+{
+  *lst_p1 = *frst = apf::countNodes(num);
+  *frst = PCU_Exscan_Int(*frst);
+  *lst_p1 += *frst;
+}
+void msi_local_node_count(msi_num * num, int * cnt)
+{
+  *cnt = apf::countNodes(num);
+}
+void msi_global_node_range(msi_num * num, int * frst, int * lst_p1)
+{
+  *frst = 0;
+  *lst_p1 = PCU_Add_Int(apf::countNodes(num));
+}
+void msi_global_node_count(msi_num * num, int * cnt)
+{
+  *cnt = PCU_Add_Int(apf::countNodes(num));
+}
+class PackedAXPB : public msi::FieldOp
 {
 protected:
   msi_fld * fld;
@@ -57,7 +97,7 @@ protected:
   MSI_SCALAR a;
   MSI_SCALAR y;
 public:
-  PackedAXPY(apf::Field * f, MSI_SCALAR a_, MSI_SCALAR y_)
+  PackedAXPB(apf::Field * f, MSI_SCALAR a_, MSI_SCALAR y_)
     : msi::FieldOp()
     , fld(f)
     , ent(NULL)
@@ -84,19 +124,36 @@ public:
     apf::setComponents(fld,ent,nd,&nd_dat[0]);
   }
 };
-void msi_field_axpy(msi_fld * fld, MSI_SCALAR a, MSI_SCALAR y)
+void msi_field_axpb(MSI_SCALAR a, msi_fld * x, MSI_SCALAR y)
 {
-  PackedAXPY(fld,a,y).apply(fld);
+  PackedAXPB(x,a,y).apply(x);
 }
-msi_fld * msi_create_field(msi_msh * msh, const char * fn, int cmps, msi_shp * shp)
+void msi_field_axpy(MSI_SCALAR a, msi_fld * x, msi_fld * y)
+{
+  apf::axpy(a,x,y);
+}
+msi_fld * msi_create_field(msi_msh * msh, const char * fn, int cmps, int ord)
 {
   (void)msh;
   (void)fn;
   (void)cmps;
-  (void)shp;
+  (void)ord;
   // todo : no direct access to tagdata
-  //return apf::makeField(msh,fn,apf::PACKED,cmps,shp,new apf::TagDataOf<MSI_SCALAR>());
+  //return apf::makeField(msh,fn,apf::PACKED,cmps,apf::getLagrange(ord),new apf::TagDataOf<MSI_SCALAR>());
   return NULL;
+}
+void msi_destroy_field(msi_fld * fld)
+{
+  apf::destroyField(fld);
+}
+msi_num * msi_number_field(msi_fld * fld, msi_num_tp tp)
+{
+  msi_num * num = apf::createNumbering(fld);
+  if(tp == MSI_NODE_NUMBERING)
+    apf::numberOwnedNodes(apf::getMesh(fld),apf::getName(fld),apf::getShape(fld));
+  else if (tp == MSI_DOF_NUMBERING)
+    apf::NaiveOrder(num);
+  return num;
 }
 void msi_local_dof_range(msi_num * num, int * frst, int * lst_p1)
 {
@@ -129,10 +186,34 @@ msi_mat * msi_create_matrix(msi_num * num)
   int lcl = 0;
   msi_global_dof_count(num,&gbl);
   msi_local_dof_count(num,&lcl);
-  #ifdef USE_PETSC
   mat = msi::createPetscMatrix(gbl,lcl);
-  #endif
   return mat;
+}
+msi_vec * msi_create_vector(msi_num * num)
+{
+  msi_vec * vec = NULL;
+  int g = 0;
+  int l = 0;
+  msi_global_dof_count(num,&g);
+  msi_local_dof_count(num,&l);
+  vec = msi::createPetscVector(g,l);
+  return vec;
+}
+void msi_vec_as_field_storage(msi_vec * vec, msi_fld * fld)
+{
+  msi::vectorFieldData<MSI_SCALAR>(fld,vec);
+}
+void msi_vec_array_field_storage(msi_vec * vec, msi_fld * fld)
+{
+  msi::vectorArrayFieldData<MSI_SCALAR>(fld,vec);
+}
+void msi_vec_array_field_activate_vec(msi_fld * fld)
+{
+  msi::vectorArrayFieldActivateVec<MSI_SCALAR>(fld);
+}
+void msi_vec_array_field_activate_field(msi_fld * fld)
+{
+  msi::vectorArrayFieldActivateField<MSI_SCALAR>(fld);
 }
 void msi_destroy_matrix(msi_mat * mat)
 {
@@ -170,6 +251,10 @@ void msi_matrix_multiply(msi_mat * mat, msi_vec * x, msi_vec * y)
 {
   ops->multiply(mat,x,y);
 }
+MSI_SCALAR msi_vector_norm(msi_vec * vec)
+{
+  return ops->norm(vec);
+}
 void msi_axpy(MSI_SCALAR * a, msi_vec * x, msi_vec * y)
 {
   ops->axpy(*a,x,y);
@@ -180,11 +265,21 @@ int msi_las_solve(msi_mat * mat, msi_vec * x, msi_vec * y)
   slvr->solve(mat,x,y);
   return slvr->getIter();
 }
-void msi_add_matrix_block(msi_mat * mat, msi_num  * num, msi_ent * ent, MSI_SCALAR * vals)
+void msi_add_matrix_block(msi_mat * mat, msi_num * num, msi_ent * ent, int rwidx, int clidx, MSI_SCALAR * vals)
 {
+  (void)rwidx;
+  (void)clidx;
   apf::NewArray<int> dof_ids;
   int dof_cnt = apf::getElementNumbers(num, ent, dof_ids);
   ops->assemble(mat,dof_cnt,&dof_ids[0],dof_cnt,&dof_ids[0],vals);
+}
+void msi_finalize_vector(msi_vec * vec)
+{
+  ops->finalize(vec);
+}
+void msi_finalize_matrix(msi_mat * mat)
+{
+  ops->finalize(mat);
 }
 /*
 struct entMsg
@@ -205,6 +300,8 @@ struct classcomp
     else return lhs.ent<rhs.ent;
   }
 };
+*/
+/*
 void set_adj_node_tag(pMesh m, pOwnership o, pMeshTag num_global_adj_node_tag, pMeshTag num_own_adj_node_tag)
 {
   int value;
@@ -300,3 +397,4 @@ void set_adj_node_tag(pMesh m, pOwnership o, pMeshTag num_global_adj_node_tag, p
   }
 }
 */
+

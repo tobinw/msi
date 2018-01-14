@@ -17,7 +17,6 @@ typedef c_omplex MSI_SCALAR;
 #else
 typedef double MSI_SCALAR;
 #endif
-enum msi_field_type { MSI_SUPPORT_FIELD = 0, MSI_SOLUTION_FIELD = 1, MSI_FIELD_TYPES = 2 };
 typedef apf::Mesh2 msi_msh;
 typedef apf::MeshEntity msi_ent;
 typedef apf::Field msi_fld;

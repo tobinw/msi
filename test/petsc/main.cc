@@ -5,27 +5,38 @@
   BSD license as described in the LICENSE file in the top-level directory.
 *******************************************************************************/
 #include "msi.h"
-#include "pumi.h"
-#include <iostream>
-#include <assert.h>
+#include <pumi.h>
+#include <PCU.h>
 #include <parma.h>
-#include "PCU.h"
-#include "petscksp.h"
+#include <petsc.h>
+#include <cassert>
+#include <algorithm>
+#include <functional>
 #include <iostream>
-#include <assert.h>
+bool close(const MSI_SCALAR & v1, const MSI_SCALAR & v2, const MSI_SCALAR abs_eps = 1e-8, const MSI_SCALAR rel_eps = 1e-12)
+{
+  if(typeid(MSI_SCALAR) == typeid(double))
+  {
+    double dif = abs(v1 - v2);
+    bool isClose = ((dif < abs_eps) ? true : (dif <= ((v1 > v2) ? v1 : v2 * rel_eps)));
+    return isClose;
+  }
+  else
+    return false;
+}
 int getConfig(int argc, char * argv[], std::string & mdl_fl, std::string & msh_fl)
 {
   int result = 0;
   if(argc < 3)
   {
     if(!PCU_Comm_Self())
-      std::cerr << help << "Usage: " << argv[0] << " model(.dmg) distributed-mesh(.smb)" << std::endl;
+      std::cerr << "Usage: " << argv[0] << " model(.dmg) distributed-mesh(.smb)" << std::endl;
     result = 1;
   }
   else
   {
-    modelFile = argv[1];
-    meshFile = argv[2];
+    mdl_fl = argv[1];
+    msh_fl = argv[2];
   }
   return result;
 }
@@ -33,172 +44,155 @@ int main(int argc, char * argv[])
 {
   MPI_Init(&argc,&argv);
   pumi_start();
-  PetscInitialize(&argc,&argv,0,help);
+  PetscInitialize(&argc,&argv,NULL,NULL);
   // suppress output to cout unless we're rank 0
-  io.setstate(std::ios_base::failbit);
-#ifdef PETSC_USE_COMPLEX
-  int scalar_type=MSI_COMPLEX;
-#else
-  int scalar_type = MSI_REAL;
-#endif
+  int rnk = -1;
+  MPI_Comm_rank(MPI_COMM_WORLD,&rnk);
+  if(rnk != 0)
+    std::cout.setstate(std::ios_base::failbit);
   std::string mdl_fl;
   std::string msh_fl;
   if(getConfig(argc,argv,mdl_fl,msh_fl))
   {
+    // load geom and mesh however we can
     pGeom g = pumi_geom_load(mdl_fl.c_str());
-    pMesh m = pumi_mesh_load(g,msh_fl.c_str(),pumi_size());
-    printStats(m);
-    int vertex_dim = 0;
-    int mesh_dim = pumi_mesh_getDim(m);
-    std:: cout << "* Start MSI ... " << std::endl;
-    msi_start(m);
-    int num_vertex = pumi_mesh_getNumEnt(m, 0);
-    int num_own_vertex = pumi_mesh_getNumOwnEnt(m, 0);
-    int num_elem = pumi_mesh_getNumEnt(m, mesh_dim);
-    int nv = 1;
-    int nd = mesh_dim == 3 ? 12 : 6;
-    std::cout << "* creating fields - " << nv*nd << " DOFs per node" << std::endl;
-    pField b_field = msi_field_create(m, "b_field", nv, nd);
-    pField c_field = msi_field_create(m, "c_field", nv, nd);
-    pField x_field = msi_field_create(m, "x_field", nv, nd);
-    pMeshEnt e = pumi_mesh_findEnt(m, mesh_dim, 0);
-    int num_nodes_elem = pumi_ment_getNumAdj(e, 0);
-    int num_dofs_node = nv * nd;
-    int num_dofs_element = num_dofs_node*num_nodes_elem;
-    if(!PCU_Comm_Self()) cout<<"* set b field ..."<<endl;
-    // fill b field
-    for(int inode=0; inode<num_vertex; inode++)
+    pMesh msh = pumi_mesh_load(g,msh_fl.c_str(),pumi_size());
+    printStats(msh);
+    int msh_dm = msi_mesh_dim(msh);
+    std::cout << "* Start MSI ... " << std::endl;
+    msi_start(msh);
+    int dofs_per_nd = msh_dm == 3 ? 12 : 6;
+    std::cout << "* creating fields - " << dofs_per_nd << " DOFs per node" << std::endl;
+    msi_fld * bfld = msi_create_field(msh, "b", dofs_per_nd, 1);
+    msi_fld * cfld = msi_create_field(msh, "c", dofs_per_nd, 1);
+    msi_fld * xfld = msi_create_field(msh, "x", dofs_per_nd, 1);
+    msi_ent * lmt = msi_get_local_ent(msh,msh_dm,0);
+    int nen = msi_nodes_on_ent(bfld,lmt);
+    int nedofs = nen * dofs_per_nd;
+    // number and create las objects
+    msi_num * num = msi_number_field(bfld,MSI_NODE_NUMBERING);
+    msi_vec * bvec = msi_create_vector(num);
+    msi_vec * cvec = msi_create_vector(num);
+    msi_vec * xvec = msi_create_vector(num);
+    msi_vec_as_field_storage(bvec,bfld);
+    msi_vec_as_field_storage(cvec,bfld);
+    msi_vec_as_field_storage(xvec,bfld);
+    msi_mat * mlt = msi_create_matrix(num);
+    msi_mat * slv = msi_create_matrix(num);
+    std::cout << "* set b field ..." << std::endl;
+    // fill b field (and vector)
+    int nv = msi_count_local_ents(msh,0);
+    std::vector<MSI_SCALAR> dofs(dofs_per_nd);
+    for(int idx = 0; idx < nv; ++idx)
     {
-      double xyz[3];
-      pMeshEnt e = pumi_mesh_findEnt(m, 0, inode);
-      pumi_node_getCoord(e, 0, xyz);
-      // 2D mesh, z component =0
-      vector<double> dofs(num_dofs_node*(1+scalar_type));
-      for(int i=0; i<num_dofs_node*(1+scalar_type); i++)
-        dofs.at(i)=xyz[i%3];
-      pumi_node_setField(b_field, e, 0, &dofs.at(0));
-    }
-    // fill matrix
-    // the matrix is diagnal dominant; thus should be positive definite
-    pMatrix matrix_mult = msi_matrix_create(MSI_MULTIPLY, b_field);
-    pMatrix matrix_solve = msi_matrix_create(MSI_SOLVE, b_field);
-    double diag_value=2.0, off_diag=1.0;
-    vector<double> block(num_dofs_element*num_dofs_element*(1+scalar_type),0);
-    for(int i=0; i<num_dofs_element; i++)
-    {
-      for(int j=0; j<num_dofs_element; j++)
+      msi_ent * vtx = msi_get_local_ent(msh,0,idx);
+      int nvn = msi_nodes_on_ent(bfld,vtx);
+      for(int nd = 0; nd < nvn; ++nd)
       {
-        double val= (i==j? diag_value: off_diag);
-        if(!scalar_type) block.at(i*num_dofs_element+j)=val;
-        else
+        double xyz[3];
+        msi_get_node_coords(bfld,vtx,nd,&xyz[0]);
+        std::fill(dofs.begin(),dofs.end(),0.0);
+        for(int ii = 0; ii < dofs_per_nd; ++ii)
+          dofs[ii] = xyz[ii%3];
+        msi_set_node_vals(bfld,vtx,nd,&dofs[0]);
+      }
+    }
+    // fill matrices
+    MSI_SCALAR ii_val = 2.0;
+    MSI_SCALAR ij_val = 1.0;
+    std::vector<MSI_SCALAR> blk(nedofs * nedofs,0.0);
+    for(int ii = 0; ii < nedofs; ++ii)
+      for(int jj = 0; jj < nedofs; ++jj)
+        blk[ii*nedofs + jj] = (ii == jj ? ii_val : ij_val);
+    double t1 = MPI_Wtime();
+    int num_lmts = msi_count_local_ents(msh,msh_dm);
+    for(int idx = 0; idx < num_lmts; ++idx)
+    {
+      msi_ent * lmt = msi_get_local_ent(msh,msh_dm,idx);
+      std::vector<MSI_SCALAR> tmp_blk = blk;
+      for(int ii = 0; ii < 1; ++ii)
+        for(int jj = 0; jj < 1; ++jj)
         {
-          block.at(2*i*num_dofs_element+2*j)=val;
-          block.at(2*i*num_dofs_element+2*j+1)=off_diag;
+          if(ii != jj)
+            std::transform(tmp_blk.begin(), tmp_blk.end(), tmp_blk.begin(), std::bind1st(std::multiplies<MSI_SCALAR>(),0.5));
+          msi_add_matrix_block(slv,num,lmt,ii,jj,&tmp_blk[0]);
+          msi_add_matrix_block(mlt,num,lmt,ii,jj,&tmp_blk[0]);
         }
-      }
     }
-    if (!pumi_rank())
-      for (int i=0; i<num_dofs_element; ++i)
-      {
-        std::cout<<"block["<<i<<"] = ";
-        for (int j=0; j<num_dofs_element; ++j)
-          std::cout<<block[i*num_dofs_element+j]<<" ";
-        std::cout<<"\n";
-      }
-    t1 = MPI_Wtime();
-    pMeshIter eit = m->begin(mesh_dim);
-    while ((e = m->iterate(eit)))
+    double t2 = MPI_Wtime();
+    std::cout << "* assemble matrix ..." << std::endl;
+    msi_finalize_matrix(mlt);
+    msi_finalize_matrix(slv);
+    double t3 = MPI_Wtime();
+    std::cout << "* multiply Ab=c ..." << std::endl;
+    msi_matrix_multiply(mlt, bvec, cvec);
+    double t4 = MPI_Wtime();
+    // field operations tests
+    // copy c -> x (zero x, then x = 1.0 * c + x)
+    msi_field_axpb(0.0, xfld, 0.0);
+    msi_field_axpy(1.0, cfld, xfld);
+    // x *= 2
+    msi_field_axpb(2.0,xfld,0.0);
+    // x += c
+    msi_field_axpy(1.0,cfld,xfld);
+    std::vector<MSI_SCALAR> cdofs(dofs_per_nd,0.0);
+    std::vector<MSI_SCALAR> xdofs(dofs_per_nd,0.0);
+    std::vector<MSI_SCALAR> bdofs(dofs_per_nd,0.0);
+    for(int idx = 0; idx < nv; ++idx)
     {
-      for(int rowVar=0; rowVar<nv; ++rowVar)
+      msi_ent * vtx = msi_get_local_ent(msh,0,idx);
+      int nvn = msi_nodes_on_ent(bfld,vtx);
+      for(int nd = 0; nd < nvn; ++nd)
       {
-        for(int colVar=0; colVar<nv; ++colVar)
-        {
-          vector<double> block_tmp = block;
-          if (rowVar!=colVar)
-          {
-            for(int i=0; i<block_tmp.size(); i++)
-              block_tmp.at(i)*=0.5/nv;
-          }
-          msi_matrix_addBlock(matrix_solve, e, rowVar, colVar, &block_tmp[0]);
-          msi_matrix_addBlock(matrix_mult, e, rowVar, colVar, &block_tmp[0]);
-        }
+        msi_get_node_vals(xfld,vtx,nd,&xdofs[0]);
+        msi_get_node_vals(cfld,vtx,nd,&cdofs[0]);
+        for(int ii = 0; ii < dofs_per_nd; ++ii)
+          assert(close(xdofs[ii],cdofs[ii]));
       }
     }
-    m->end(eit);
-    t2 = MPI_Wtime();
-    if(!PCU_Comm_Self()) cout<<"* assemble matrix ..."<<endl;
-    msi_matrix_assemble(matrix_mult);
-    msi_matrix_assemble(matrix_solve);
-    t3 = MPI_Wtime();
-    if(!PCU_Comm_Self()) cout<<"* multiply Ab=c ..."<<endl;
-    msi_matrix_multiply(matrix_mult, b_field, c_field);
-    t4 = MPI_Wtime();
-    // let's test field operations here
-    pumi_field_copy(c_field, x_field);
-    double val[]={2.};
-    int realtype=0;
-    pumi_field_multiply(x_field, 2.0, x_field);
-    pumi_field_add(x_field, c_field, x_field);
-    pMeshIter it = m->begin(0);
-    while ((e = m->iterate(it)))
-    {
-      vector<double> dofs1(num_dofs_node*(1+scalar_type)), dofs2(num_dofs_node*(1+scalar_type));
-      pumi_node_getField(c_field, e, 0, &dofs1.at(0));
-      pumi_node_getField(x_field, e, 0, &dofs2.at(0));
-      for(int i=0; i<num_dofs_node*((1+scalar_type)); ++i)
-        assert(AlmostEqualDoubles(dofs2.at(i), (val[0]+1)*dofs1.at(i), 1e-6, 1e-6));
-    }
-    m->end(it);
     // copy c field to x field
-    pumi_field_copy(c_field, x_field);
-    t5 = MPI_Wtime();
-    if(!PCU_Comm_Self()) cout<<"* solve Ax=c ..."<<endl;
+    // copy c -> x (zero x, then x = 1.0 * c + x)
+    msi_field_axpb(0.0, xfld, 0.0);
+    msi_field_axpy(1.0, cfld, xfld);
+    double t5 = MPI_Wtime();
+    std::cout << "* solve Ax=c ..." << std::endl;
     // solve Ax=c
-    int solver_type = 0;    // PETSc direct solver
-    double solver_tol = 1e-6;
-    msi_matrix_solve(matrix_solve, c_field, x_field);
-    t6 = MPI_Wtime();
+    msi_las_solve(slv,xvec,cvec);
+    double t6 = MPI_Wtime();
     // verify x=b
-    if(!PCU_Comm_Self()) cout<<"* verify x==b..."<<endl;
-    it = m->begin(0);
-    while ((e = m->iterate(it)))
+    std::cout << "* verify x==b..." << std::endl;
+    for(int idx = 0; idx < nv; ++idx)
     {
-      vector<double> dofs_x(num_dofs_node*(1+scalar_type)), dofs_b(num_dofs_node*(1+scalar_type));
-      pumi_node_getField(b_field, e, 0, &dofs_b.at(0));
-      pumi_node_getField(x_field, e, 0, &dofs_x.at(0));
-      for(int idof=0; idof<num_dofs_node*(1+scalar_type); ++idof)
-        assert(AlmostEqualDoubles(dofs_b.at(idof),dofs_x.at(idof), 1e-3, 1e-3));
+      msi_ent * vtx = msi_get_local_ent(msh,0,idx);
+      int nvn = msi_nodes_on_ent(bfld,vtx);
+      for(int nd = 0; nd < nvn; ++nd)
+      {
+        msi_get_node_vals(xfld,vtx,nd,&xdofs[0]);
+        msi_get_node_vals(bfld,vtx,nd,&bdofs[0]);
+        for(int ii = 0; ii < dofs_per_nd; ++ii)
+          assert(close(xdofs[ii],bdofs[ii]));
+      }
     }
-    m->end(it);
-    if(!PCU_Comm_Self())
-      cout<<"* time: fill matrix "<<t2-t1<<" assemble "<<t3-t2<<" mult "<<t4-t3<<" solve "<<t6-t5<<endl;
-    msi_matrix_delete(matrix_mult);
-    msi_matrix_delete(matrix_solve);
-    pumi_mesh_verify(m, false);
-    pumi_field_delete(x_field);
-    pumi_field_delete(b_field);
-    pumi_field_delete(c_field);
+    std::cout << "* timings: " << std::endl
+              << "  add matrix vals : " << t2-t1 << std::endl
+              << "  assemble matrix : " << t3-t2 << std::endl
+              << "  matrix multiply : " << t4-t3 << std::endl
+              << "  solve mat sys   : " << t6-t5 << std::endl;
+    msi_destroy_matrix(mlt);
+    msi_destroy_matrix(slv);
+    pumi_mesh_verify(msh, false);
+    // should destroy the fields before the vectors used to store the fields
+    msi_destroy_field(xfld);
+    msi_destroy_field(bfld);
+    msi_destroy_field(cfld);
+    msi_destroy_vector(xvec);
+    msi_destroy_vector(bvec);
+    msi_destroy_vector(cvec);
+    msi_finalize(msh);
+    pumi_mesh_delete(msh);
   }
-  msi_finalize(m);
-  pumi_mesh_delete(m);
   pumi_finalize();
   PetscFinalize();
   MPI_Finalize();
   return 0;
-}
-bool AlmostEqualDoubles(double A, double B,
-                        double maxDiff, double maxRelDiff)
-{
-// http://randomascii.wordpress.com/2012/02/25/comparing-floating-point-numbers-2012-edition/
-  // Check if the numbers are really close -- needed
-  // when comparing numbers near zero.
-  double diff = fabs(A - B);
-  if (diff <= maxDiff)
-    return true;
-  A = fabs(A);
-  B = fabs(B);
-  double largest = (B > A) ? B : A;
-  if (diff <= largest * maxRelDiff)
-    return true;
-  return false;
 }

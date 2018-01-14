@@ -25,6 +25,8 @@ namespace msi
     virtual void axpy(double a, Vec * x, Vec * y) = 0;
     virtual void get(Vec * v, double *& vls) = 0;
     virtual void restore(Vec * v, double *& vls) = 0;
+    virtual void finalize(Vec * v) = 0;
+    virtual void finalize(Mat * m) = 0;
   };
   class LasSolve
   {

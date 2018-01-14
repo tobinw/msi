@@ -20,7 +20,6 @@ namespace msi
   void destroyPetscMatrix(Mat * m);
   Vec * createPetscVector(int gbl, int lcl);
   void destroyPetscVector(Vec * v);
-  FieldVec * createPetscFieldVec(apf::Numbering * nm, apf::Field * f);
   LasOps * getPetscOps();
   LasSolve * createPetscLUSolve();
   LasSolve * createPetscQNSolve(void * a);
@@ -39,6 +38,16 @@ namespace msi
     virtual void axpy(double a, Vec * x, Vec * y);
     virtual void get(Vec * v, double *& vls);
     virtual void restore(Vec * v, double *& vls);
+    virtual void finalize(Vec * v);
+    virtual void finalize(Mat * m);
   };
+  template <typename T>
+  void vectorFieldData(msi_fld * fld, msi_vec * vec);
+  template <typename T>
+  void vectorArrayFieldData(msi_fld * fld, msi_vec * vec);
+  template <typename T>
+  void vectorArrayFieldActivateField(msi_fld * fld);
+  template <typename T>
+  void vectorArrayFieldActivateVec(msi_fld * fld);
 }
 #endif

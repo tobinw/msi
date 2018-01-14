@@ -6,7 +6,7 @@
 *******************************************************************************/
 #ifndef MSI_SOLVER_H
 #define MSI_SOLVER_H
-#include "msi.h"
+#include "msi_types.h"
 namespace msi
 {
   class Sim;
@@ -14,9 +14,14 @@ namespace msi
   void destroyApfSim(Sim * s);
   class Sim
   {
+  protected:
+    msi_msh * msh;
   public:
-    virtual int registerField(msi_field_type tp, msi_fld * fld) = 0;
-    virtual msi_fld * accessField(msi_field_type tp, int id) = 0;
+    Sim(msi_msh * m) : msh(m) {}
+    virtual int registerField(msi_fld_tp tp, msi_fld * fld) = 0;
+    virtual msi_fld * accessField(msi_fld_tp tp, int id) = 0;
+    virtual int numberFields(msi_fld_tp tp) = 0;
+    virtual msi_num * accessNumbering(msi_fld_tp tp, int id) = 0;
   };
 }
 #endif

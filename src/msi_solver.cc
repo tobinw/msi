@@ -15,12 +15,12 @@ namespace msi
   class apf_sim : public Sim
   {
   public:
-    virtual int registerField(msi_field_type tp, msi_fld * fld)
+    virtual int registerField(msi_fld_tp tp, msi_fld * fld)
     {
       flds[tp].push_back(fld);
       return static_cast<int>(flds[tp].size());
     }
-    virtual msi_fld * accessField(msi_field_type tp, int id)
+    virtual msi_fld * accessField(msi_fld_tp tp, int id)
     {
       // assert id is < size
       return flds[tp].at(id);

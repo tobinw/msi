@@ -9,6 +9,7 @@
 #include <petscksp.h>
 #include <petscsnes.h>
 #include <PCU.h>
+#include <cassert>
 #include <iostream>
 namespace msi
 {
@@ -40,6 +41,14 @@ namespace msi
   ::Vec * getPetscVec(msi::Vec * v)
   {
     return reinterpret_cast<::Vec*>(v);
+  }
+  void destroyPetscMatrix(msi::Mat * m)
+  {
+    MatDestroy(getPetscMat(m));
+  }
+  void destroyPetscVector(msi::Vec * v)
+  {
+    VecDestroy(getPetscVec(v));
   }
   LasOps * getPetscOps()
   {
@@ -74,7 +83,22 @@ namespace msi
   }
   void PetscOps::multiply(msi::Mat * m, msi::Vec * x, msi::Vec * y)
   {
-    MatMult(*getPetscMat(m),*getPetscVec(x),*getPetscVec(y));
+    assert(x != y);
+    ::Mat * pm = getPetscMat(m);
+    ::Vec * vx = getPetscVec(x);
+    ::Vec * vy = getPetscVec(y);
+    PetscBool ass;
+    MatAssembled(*pm,&ass);
+    if(!ass)
+    {
+      MatAssemblyBegin(*pm,MAT_FINAL_ASSEMBLY);
+      MatAssemblyEnd(*pm,MAT_FINAL_ASSEMBLY);
+    }
+    VecAssemblyBegin(*vx);
+    VecAssemblyEnd(*vx);
+    VecAssemblyBegin(*vy);
+    VecAssemblyEnd(*vy);
+    MatMult(*pm,*vx,*vy);
   }
   double PetscOps::norm(msi::Vec * v)
   {
@@ -100,6 +124,23 @@ namespace msi
   {
     VecRestoreArray(*getPetscVec(v),&vls);
   }
+  void PetscOps::finalize(msi::Mat * m)
+  {
+    ::Mat * pm = getPetscMat(m);
+    PetscBool ass;
+    MatAssembled(*pm,&ass);
+    if(!ass)
+    {
+      MatAssemblyBegin(*pm,MAT_FINAL_ASSEMBLY);
+      MatAssemblyEnd(*pm,MAT_FINAL_ASSEMBLY);
+    }
+  }
+  void PetscOps::finalize(msi::Vec * v)
+  {
+    ::Vec * pv = getPetscVec(v);
+    VecAssemblyBegin(*pv);
+    VecAssemblyEnd(*pv);
+  }
   class PetscLUSolve : public LasSolve
   {
   public:
@@ -112,8 +153,13 @@ namespace msi
       KSPCreate(PETSC_COMM_WORLD,&s);
       VecAssemblyBegin(*pf);
       VecAssemblyEnd(*pf);
-      MatAssemblyBegin(*pk,MAT_FINAL_ASSEMBLY);
-      MatAssemblyEnd(*pk,MAT_FINAL_ASSEMBLY);
+      PetscBool ass;
+      MatAssembled(*pk,&ass);
+      if(!ass)
+      {
+        MatAssemblyBegin(*pk,MAT_FINAL_ASSEMBLY);
+        MatAssemblyEnd(*pk,MAT_FINAL_ASSEMBLY);
+      }
       KSPSetOperators(s,*pk,*pk);
       KSPSetFromOptions(s);
       KSPSolve(s,*pf,*pu);
@@ -157,41 +203,154 @@ namespace msi
   {
     return new PetscQNSolve(a);
   }
-  class PetscFieldVec : public FieldVec
+  template <class T>
+  class PetscVecDataOf : public apf::FieldDataOf<T>
   {
   protected:
-    ::Vec * v;
-    PetscScalar * arr;
+    msi_vec * vec;
+    msi_num * num;
   public:
-    PetscFieldVec(apf::Numbering * n_, apf::Field * f_)
-      : FieldVec(n_,f_)
-      , v(NULL)
-      , arr(NULL)
+    PetscVecDataOf(msi_vec * v)
+      : apf::FieldDataOf<T>()
+      , vec(v)
+      , num(NULL)
+    { }
+    virtual void init(apf::FieldBase * f)
     {
-      int l = apf::countNodes(n);
-      int g = PCU_Exscan_Int(l);
-      VecCreateMPI(PETSC_COMM_WORLD,l,g,v);
-      VecSetOption(*v,VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);
-      VecGetArray(*v,&arr);
-      // todo: use array for field storage
-      if(!apf::isFrozen(f))
-        apf::freeze(f);
+      this->field = f;
+      apf::FieldShape * s = f->getShape();
+      const char * name = s->getName();
+      apf::Numbering * n = f->getMesh()->findNumbering(name);
+      if (!n)
+        n = numberOverlapNodes(f->getMesh(),name,s);
+      num = n;
     }
-    virtual Vec * checkout()
+    virtual ~PetscVecDataOf() { }
+    virtual bool hasEntity(apf::MeshEntity*)
     {
-      xd = false;
-      VecRestoreArray(*v,&arr);
-      return reinterpret_cast<msi::Vec*>(v);
+      return true;
     }
-    virtual void restore(Vec *& vi)
+    virtual void removeEntity(apf::MeshEntity*)
+    { }
+    virtual void get(apf::MeshEntity * e, T * data)
     {
-      xd = false;
-      VecGetArray(*v,&arr);
-      vi = NULL;
+      apf::NewArray<int> dofs;
+      int dof_cnt = apf::getElementNumbers(num,e,dofs);
+      VecGetValues(*getPetscVec(vec),dof_cnt,&dofs[0],&data[0]);
+    }
+    virtual void set(apf::MeshEntity * e, T const * data)
+    {
+      apf::NewArray<int> dofs;
+      int dof_cnt = apf::getElementNumbers(num,e,dofs);
+      VecSetValues(*getPetscVec(vec),dof_cnt,&dofs[0],&data[0],INSERT_VALUES);
+    }
+    virtual bool isFrozen()
+    {
+      return true;
     }
   };
-  FieldVec * createPetscFieldVec(apf::Numbering * nm, apf::Field * f)
+  template <class T>
+  class PetscVecArrayDataOf : public apf::FieldDataOf<T>
   {
-    return new PetscFieldVec(nm,f);
+  protected:
+    msi_vec * vec;
+    T * arr;
+    msi_num * num;
+    bool valid;
+  public:
+    PetscVecArrayDataOf(msi_vec * v)
+      : apf::FieldDataOf<T>()
+      , vec(v)
+      , arr(NULL)
+      , num(NULL)
+      , valid(true)
+    { }
+    virtual void init(apf::FieldBase * f)
+    {
+      this->field = f;
+      apf::FieldShape * s = f->getShape();
+      const char * name = s->getName();
+      apf::Numbering * n = f->getMesh()->findNumbering(name);
+      if (!n)
+        n = numberOverlapNodes(f->getMesh(),name,s);
+      num = n;
+      // assert that the vector has enough size to store the data
+    }
+    virtual ~PetscVecArrayDataOf() { }
+    virtual bool hasEntity(apf::MeshEntity*)
+    {
+      return true;
+    }
+    virtual void removeEntity(apf::MeshEntity*)
+    { }
+    virtual void get(apf::MeshEntity * e, T * data)
+    {
+      if(!valid)
+        std::cerr << "Error! Cannot access field data while underlying vector is active! Call .activateField()" << std::endl;
+      apf::NewArray<int> dofs;
+      int dof_cnt = apf::getElementNumbers(num,e,dofs);
+      // could replace with memcpy if all accesses are contiguous
+      for(int ii = 0; ii < dof_cnt; ++ii)
+        data[ii] = arr[dofs[ii]];
+    }
+    virtual void set(apf::MeshEntity * e, T const * data)
+    {
+      if(!valid)
+        std::cerr << "Error! Cannot access field data while underlying vector is active! Call .activateField()" << std::endl;
+      apf::NewArray<int> dofs;
+      int dof_cnt = apf::getElementNumbers(num,e,dofs);
+      // could replace with memcpy if all accesses are contiguous
+      for(int ii = 0; ii < dof_cnt; ++ii)
+        arr[dofs[ii]] = data[ii];
+    }
+    virtual bool isFrozen()
+    {
+      return true;
+    }
+    void activateVec()
+    {
+      VecRestoreArray(*getPetscVec(vec),&arr);
+      valid = false;
+    }
+    void activateField()
+    {
+      VecGetArray(*getPetscVec(vec),&arr);
+      valid = true;
+    }
+  };
+  template <class T>
+  void vectorFieldData(msi_fld * fld, msi_vec * vec)
+  {
+    PetscVecDataOf<T>* newData = new PetscVecDataOf<T>(vec);
+    newData->init(fld);
+    apf::FieldDataOf<T> * oldData = static_cast<apf::FieldDataOf<T>*>(fld->getData());
+    apf::copyFieldData<T>(oldData,newData);
+    fld->changeData(newData);
   }
+  template <class T>
+  void vectorArrayFieldData(msi_fld * fld, Vec * vec)
+  {
+    PetscVecArrayDataOf<T>* newData = new PetscVecArrayDataOf<T>(vec);
+    newData->init(fld);
+    apf::FieldDataOf<T> * oldData = static_cast<apf::FieldDataOf<T>*>(fld->getData());
+    apf::copyFieldData<T>(oldData,newData);
+    fld->changeData(newData);
+  }
+  template <class T>
+  void vectorArrayFieldActivateField(msi_fld * fld)
+  {
+    PetscVecArrayDataOf<T>* data = static_cast<PetscVecArrayDataOf<T>*>(fld->getData());
+    data->activateField();
+  }
+  template <class T>
+  void vectorArrayFieldActivateVec(msi_fld * fld)
+  {
+    PetscVecArrayDataOf<T>* data = static_cast<PetscVecArrayDataOf<T>*>(fld->getData());
+    data->activateVec();
+  }
+  //instantiate the template functions
+  template void vectorFieldData<MSI_SCALAR>(msi_fld * fld, msi_vec * vec);
+  template void vectorArrayFieldData<MSI_SCALAR>(msi_fld * fld, msi_vec * vec);
+  template void vectorArrayFieldActivateField<MSI_SCALAR>(msi_fld * fld);
+  template void vectorArrayFieldActivateVec<MSI_SCALAR>(msi_fld * fld);
 }
