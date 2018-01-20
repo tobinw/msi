@@ -44,7 +44,7 @@ namespace msi
   template <typename T>
   void vectorFieldData(msi_fld * fld, msi_vec * vec);
   template <typename T>
-  void vectorArrayFieldData(msi_fld * fld, msi_vec * vec);
+  void vectorArrayFieldData(msi_fld * fld, msi_num * num, msi_vec * vec);
   template <typename T>
   void vectorArrayFieldActivateField(msi_fld * fld);
   template <typename T>

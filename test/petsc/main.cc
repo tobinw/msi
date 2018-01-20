@@ -65,18 +65,26 @@ int main(int argc, char * argv[])
     std::cout << "* creating fields - " << dofs_per_nd << " DOFs per node" << std::endl;
     msi_fld * bfld = msi_create_field(msh, "b", dofs_per_nd, 1);
     msi_fld * cfld = msi_create_field(msh, "c", dofs_per_nd, 1);
-    msi_fld * xfld = msi_create_field(msh, "x", dofs_per_nd, 1);
     msi_ent * lmt = msi_get_local_ent(msh,msh_dm,0);
     int nen = msi_nodes_on_ent(bfld,lmt);
     int nedofs = nen * dofs_per_nd;
     // number and create las objects
-    msi_num * num = msi_number_field(bfld,MSI_NODE_NUMBERING);
+
+    msi_fld * xfld = msi_create_field(msh, "x", dofs_per_nd, 1);
+    msi_num * num = msi_number_field(xfld,MSI_NODE_NUMBERING);
+    msi_vec * xvec = msi_create_vector(num);
+    msi_vec_array_field_storage(xvec,num,xfld);
+    // operate on the msi_fld
+    msi_vec_array_field_activate_vec(xfld);
+    // operate on the msi_vec
+    msi_vec_array_field_activate_field(xfld);
+    // operate on the msi_fld
+
+    
     msi_vec * bvec = msi_create_vector(num);
     msi_vec * cvec = msi_create_vector(num);
-    msi_vec * xvec = msi_create_vector(num);
     msi_vec_as_field_storage(bvec,bfld);
-    msi_vec_as_field_storage(cvec,bfld);
-    msi_vec_as_field_storage(xvec,bfld);
+    msi_vec_as_field_storage(cvec,cfld);
     msi_mat * mlt = msi_create_matrix(num);
     msi_mat * slv = msi_create_matrix(num);
     std::cout << "* set b field ..." << std::endl;
@@ -108,15 +116,15 @@ int main(int argc, char * argv[])
     int num_lmts = msi_count_local_ents(msh,msh_dm);
     for(int idx = 0; idx < num_lmts; ++idx)
     {
-      msi_ent * lmt = msi_get_local_ent(msh,msh_dm,idx);
+      //msi_ent * lmt = msi_get_local_ent(msh,msh_dm,idx);
       std::vector<MSI_SCALAR> tmp_blk = blk;
       for(int ii = 0; ii < 1; ++ii)
         for(int jj = 0; jj < 1; ++jj)
         {
           if(ii != jj)
             std::transform(tmp_blk.begin(), tmp_blk.end(), tmp_blk.begin(), std::bind1st(std::multiplies<MSI_SCALAR>(),0.5));
-          msi_add_matrix_block(slv,num,lmt,ii,jj,&tmp_blk[0]);
-          msi_add_matrix_block(mlt,num,lmt,ii,jj,&tmp_blk[0]);
+          msi_add_matrix_block(slv,ii,jj,&tmp_blk[0]);
+          msi_add_matrix_block(mlt,ii,jj,&tmp_blk[0]);
         }
     }
     double t2 = MPI_Wtime();

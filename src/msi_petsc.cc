@@ -34,11 +34,11 @@ namespace msi
     VecSetOption(*v,VEC_IGNORE_NEGATIVE_INDICES,PETSC_TRUE);
     return reinterpret_cast<msi::Vec*>(v);
   }
-  ::Mat * getPetscMat(msi::Mat * m)
+  inline ::Mat * getPetscMat(msi::Mat * m)
   {
     return reinterpret_cast<::Mat*>(m);
   }
-  ::Vec * getPetscVec(msi::Vec * v)
+  inline ::Vec * getPetscVec(msi::Vec * v)
   {
     return reinterpret_cast<::Vec*>(v);
   }
@@ -256,30 +256,27 @@ namespace msi
     msi_vec * vec;
     T * arr;
     msi_num * num;
+    int frst;
     bool valid;
   public:
-    PetscVecArrayDataOf(msi_vec * v)
+    PetscVecArrayDataOf(msi_vec * v, msi_num * n)
       : apf::FieldDataOf<T>()
       , vec(v)
       , arr(NULL)
-      , num(NULL)
+      , num(n)
+      , frst(0)
       , valid(true)
     { }
     virtual void init(apf::FieldBase * f)
     {
       this->field = f;
-      apf::FieldShape * s = f->getShape();
-      const char * name = s->getName();
-      apf::Numbering * n = f->getMesh()->findNumbering(name);
-      if (!n)
-        n = numberOverlapNodes(f->getMesh(),name,s);
-      num = n;
+      frst = PCU_Exscan_Int(apf::countNodes(num) * apf::countComponents(apf::getField(num)));
       // assert that the vector has enough size to store the data
     }
     virtual ~PetscVecArrayDataOf() { }
-    virtual bool hasEntity(apf::MeshEntity*)
+    virtual bool hasEntity(apf::MeshEntity * ent)
     {
-      return true;
+      return apf::getMesh(num)->isOwned(ent);
     }
     virtual void removeEntity(apf::MeshEntity*)
     { }
@@ -289,9 +286,9 @@ namespace msi
         std::cerr << "Error! Cannot access field data while underlying vector is active! Call .activateField()" << std::endl;
       apf::NewArray<int> dofs;
       int dof_cnt = apf::getElementNumbers(num,e,dofs);
-      // could replace with memcpy if all accesses are contiguous
+      // need to offset the dof vals by the first local dof value...
       for(int ii = 0; ii < dof_cnt; ++ii)
-        data[ii] = arr[dofs[ii]];
+        data[ii] = arr[dofs[ii]-frst];
     }
     virtual void set(apf::MeshEntity * e, T const * data)
     {
@@ -301,7 +298,7 @@ namespace msi
       int dof_cnt = apf::getElementNumbers(num,e,dofs);
       // could replace with memcpy if all accesses are contiguous
       for(int ii = 0; ii < dof_cnt; ++ii)
-        arr[dofs[ii]] = data[ii];
+        arr[dofs[ii]-frst] = data[ii];
     }
     virtual bool isFrozen()
     {
@@ -328,9 +325,9 @@ namespace msi
     fld->changeData(newData);
   }
   template <class T>
-  void vectorArrayFieldData(msi_fld * fld, Vec * vec)
+  void vectorArrayFieldData(msi_fld * fld, msi_num * num, Vec * vec)
   {
-    PetscVecArrayDataOf<T>* newData = new PetscVecArrayDataOf<T>(vec);
+    PetscVecArrayDataOf<T>* newData = new PetscVecArrayDataOf<T>(vec,num);
     newData->init(fld);
     apf::FieldDataOf<T> * oldData = static_cast<apf::FieldDataOf<T>*>(fld->getData());
     apf::copyFieldData<T>(oldData,newData);
@@ -350,7 +347,7 @@ namespace msi
   }
   //instantiate the template functions
   template void vectorFieldData<MSI_SCALAR>(msi_fld * fld, msi_vec * vec);
-  template void vectorArrayFieldData<MSI_SCALAR>(msi_fld * fld, msi_vec * vec);
+  template void vectorArrayFieldData<MSI_SCALAR>(msi_fld * fld, msi_num * num, msi_vec * vec);
   template void vectorArrayFieldActivateField<MSI_SCALAR>(msi_fld * fld);
   template void vectorArrayFieldActivateVec<MSI_SCALAR>(msi_fld * fld);
 }

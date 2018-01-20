@@ -60,12 +60,13 @@ MSI_SCALAR msi_vector_norm(msi_vec * vec);
 void msi_matrix_multiply(msi_mat * a, msi_vec * x, msi_vec * y);
 void msi_axpy(MSI_SCALAR * a, msi_vec * x, msi_vec * y); // y = ax+y
 int msi_las_solve(msi_mat * mat, msi_vec * x, msi_vec * y);
-void msi_add_matrix_block(msi_mat * mat, msi_num * num, msi_ent * ent, int rwidx, int clidx, MSI_SCALAR * vals);
+void msi_add_matrix_block(msi_mat * mat, int brw, int bcl, MSI_SCALAR * vals);
+void msi_add_matrix_blocks(msi_mat * mat, int cnt_br, int * brws, int cnt_bc, int * bcls, MSI_SCALAR * vals);
 void msi_finalize_matrix(msi_mat * mat);
 void msi_finalize_vector(msi_vec * vec);
 // las backend storage api
 void msi_vec_as_field_storage(msi_vec * vec, msi_fld * fld);
-void msi_vec_array_field_storage(msi_vec * vec, msi_fld * fld);
+void msi_vec_array_field_storage(msi_vec * vec, msi_num * num, msi_fld * fld);
 void msi_vec_array_field_activate_vec(msi_fld * fld);
 void msi_vec_array_field_activate_field(msi_fld * fld);
 #endif

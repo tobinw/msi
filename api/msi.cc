@@ -10,8 +10,10 @@
 #include "msi_petsc.h"
 #include <iostream>
 #include <apfMDS.h>
+#include <apfArrayData.h>
 #include <apfNumbering.h>
 #include <apfShape.h>
+#include <apfTagData.h>
 #include <PCU.h>
 #include <vector>
 #include <assert.h>
@@ -60,11 +62,11 @@ void msi_node_dof_range(msi_num * num, msi_ent * ent, int nd, int * frst, int * 
   *frst = nd_id * nd_dofs;
   *lst_p1 = *frst + nd_dofs;
 }
-void msi_set_node_vals(msi_fld * fld, msi_ent * ent, int nd, double * dofs)
+void msi_set_node_vals(msi_fld * fld, msi_ent * ent, int nd, MSI_SCALAR * dofs)
 {
   apf::setComponents(fld, ent, nd, dofs);
 }
-void msi_get_node_vals(msi_fld * fld, msi_ent * ent, int nd, double * dofs)
+void msi_get_node_vals(msi_fld * fld, msi_ent * ent, int nd, MSI_SCALAR * dofs)
 {
   apf::getComponents(fld, ent, nd, dofs);
 }
@@ -134,12 +136,9 @@ void msi_field_axpy(MSI_SCALAR a, msi_fld * x, msi_fld * y)
 }
 msi_fld * msi_create_field(msi_msh * msh, const char * fn, int cmps, int ord)
 {
-  (void)msh;
-  (void)fn;
-  (void)cmps;
-  (void)ord;
-  // todo : no direct access to tagdata
-  //return apf::makeField(msh,fn,apf::PACKED,cmps,apf::getLagrange(ord),new apf::TagDataOf<MSI_SCALAR>());
+  msi_fld * fld = NULL;
+  fld = apf::makeField(msh,fn,apf::PACKED,cmps,apf::getLagrange(ord),new apf::TagDataOf<MSI_SCALAR>());
+  apf::freezeFieldData<MSI_SCALAR>(fld);
   return NULL;
 }
 void msi_destroy_field(msi_fld * fld)
@@ -148,9 +147,12 @@ void msi_destroy_field(msi_fld * fld)
 }
 msi_num * msi_number_field(msi_fld * fld, msi_num_tp tp)
 {
-  msi_num * num = apf::createNumbering(fld);
+  msi_num * num = NULL;
   if(tp == MSI_NODE_NUMBERING)
-    apf::numberOwnedNodes(apf::getMesh(fld),apf::getName(fld),apf::getShape(fld));
+  {
+    num = apf::numberOwnedNodes(apf::getMesh(fld),apf::getName(fld),apf::getShape(fld));
+    apf::makeGlobal(num,true);
+  }
   else if (tp == MSI_DOF_NUMBERING)
     apf::NaiveOrder(num);
   return num;
@@ -203,9 +205,9 @@ void msi_vec_as_field_storage(msi_vec * vec, msi_fld * fld)
 {
   msi::vectorFieldData<MSI_SCALAR>(fld,vec);
 }
-void msi_vec_array_field_storage(msi_vec * vec, msi_fld * fld)
+void msi_vec_array_field_storage(msi_vec * vec, msi_num * num, msi_fld * fld)
 {
-  msi::vectorArrayFieldData<MSI_SCALAR>(fld,vec);
+  msi::vectorArrayFieldData<MSI_SCALAR>(fld,num,vec);
 }
 void msi_vec_array_field_activate_vec(msi_fld * fld)
 {
@@ -265,13 +267,22 @@ int msi_las_solve(msi_mat * mat, msi_vec * x, msi_vec * y)
   slvr->solve(mat,x,y);
   return slvr->getIter();
 }
-void msi_add_matrix_block(msi_mat * mat, msi_num * num, msi_ent * ent, int rwidx, int clidx, MSI_SCALAR * vals)
+void msi_add_matrix_block(msi_mat * mat, int brw, int bcl, MSI_SCALAR * vals)
 {
-  (void)rwidx;
-  (void)clidx;
-  apf::NewArray<int> dof_ids;
-  int dof_cnt = apf::getElementNumbers(num, ent, dof_ids);
-  ops->assemble(mat,dof_cnt,&dof_ids[0],dof_cnt,&dof_ids[0],vals);
+  (void)mat;
+  (void)brw;
+  (void)bcl;
+  (void)vals;
+  //ops->assemble(mat,dof_cnt,&dof_ids[0],dof_cnt,&dof_ids[0],vals);
+}
+void msi_add_matrix_blocks(msi_mat * mat, int cnt_br, int * brws, int cnt_bc, int * bcls, MSI_SCALAR * vals)
+{
+  (void)mat;
+  (void)cnt_br;
+  (void)brws;
+  (void)cnt_bc;
+  (void)bcls;
+  (void)vals;
 }
 void msi_finalize_vector(msi_vec * vec)
 {
