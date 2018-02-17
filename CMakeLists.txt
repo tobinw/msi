@@ -4,6 +4,7 @@
 cmake_minimum_required (VERSION 3.4)
 project (msi)
 enable_language (Fortran)
+set(MSI_VERSION 1.0.0)
 
 # make sure that the default is a RELEASE
 if (NOT CMAKE_BUILD_TYPE)
@@ -52,10 +53,6 @@ add_custom_target(doc
 )
 endif(DOXYGEN_FOUND)
 
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/msiConfig.cmake.in"
-    "${CMAKE_BINARY_DIR}/msiConfig.cmake")
-
 #Source and header files
 set(SOURCES
   api/msi.cc
@@ -66,20 +63,24 @@ set(SOURCES
 
 set(HEADERS
   api/msi.h
-  include/msi_las.h
-  include/msi_solver.h
-  include/msi_petsc.h
-  include/msi_trilinos.h
-  include/msi_field_storage.h
-  include/msi_field_op.h
+  api/msi_types.h
 )
+
+#  include/msi_las.h
+#  include/msi_solver.h
+#  include/msi_petsc.h
+#  include/msi_trilinos.h
+#  include/msi_field_storage.h
+#  include/msi_field_op.h
+
 
 set(CMAKE_MODULE_PATH
    ${CMAKE_MODULE_PATH}
    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
-list(APPEND INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/include
-                     ${CMAKE_CURRENT_SOURCE_DIR}/api)
+list(APPEND INCLUDES $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                     $<INSTALL_INTERFACE:include>
+                     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/api>)
 set(TARGET_LIB_NAME msi)
 
 find_package(Scorec REQUIRED)
@@ -117,10 +118,24 @@ add_library(${TARGET_LIB_NAME} ${SOURCES})
 target_include_directories(${TARGET_LIB_NAME} PUBLIC ${INCLUDES})
 target_link_libraries(${TARGET_LIB_NAME} ${DEP_LIBS})
 
-INSTALL(FILES ${HEADERS} DESTINATION include)
-INSTALL(TARGETS ${TARGET_LIB_NAME}
-      LIBRARY DESTINATION lib
-      ARCHIVE DESTINATION lib)
+install(FILES ${HEADERS} DESTINATION include)
+install(TARGETS ${TARGET_LIB_NAME}
+        EXPORT ${TARGET_LIB_NAME}Targets
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib)
+export(EXPORT ${TARGET_LIB_NAME}Targets
+       FILE "${CMAKE_BINARY_DIR}/msi/${TARGET_LIB_NAME}Targets.cmake")
+set(ConfigPackageLocation lib/cmake/msi)
+install(EXPORT ${TARGET_LIB_NAME}Targets
+        DESTINATION ${ConfigPackageLocation})
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/msi/${TARGET_LIB_NAME}ConfigVersion.cmake"
+                                 VERSION ${MSI_VERSION}
+                                 COMPATIBILITY AnyNewerVersion)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/msiConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/msi/${TARGET_LIB_NAME}Config.cmake" @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/msi/${TARGET_LIB_NAME}Config.cmake ${CMAKE_CURRENT_BINARY_DIR}/msi/${TARGET_LIB_NAME}ConfigVersion.cmake
+        DESTINATION ${ConfigPackageLocation}
+        COMPONENT Devel)
 
 if (ENABLE_TESTING)
   if (ENABLE_PETSC)
