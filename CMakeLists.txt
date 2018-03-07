@@ -64,6 +64,7 @@ set(SOURCES
 set(HEADERS
   api/msi.h
   api/msi_types.h
+  api/msi.f90
 )
 
 #  include/msi_las.h

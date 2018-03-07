@@ -20,13 +20,13 @@
 #include <cmath> // isnan
 msi::LasOps * ops = NULL;
 //void set_adj_node_tag(pMesh m, pOwnership, pMeshTag num_global_adj_node_tag, pMeshTag num_own_adj_node_tag);
-void msi_start(msi_msh * )
+void msi_start()
 {
   #ifdef MSI_PETSC
   ops = msi::getPetscOps();
   #endif
 }
-void msi_finalize(msi_msh *)
+void msi_finalize()
 { }
 int msi_mesh_dim(msi_msh * msh)
 {

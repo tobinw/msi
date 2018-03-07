@@ -6,7 +6,7 @@
 *******************************************************************************/
 #ifndef MSI_TYPES_H_
 #define MSI_TYPES_H_
-#include "msi_las.h"
+//#include "msi_las.h"
 #include <apf.h>
 #include <apfMesh2.h>
 #include <apfNumbering.h>
@@ -22,6 +22,11 @@ typedef apf::MeshEntity msi_ent;
 typedef apf::Field msi_fld;
 typedef apf::FieldShape msi_shp;
 typedef apf::Numbering msi_num;
+namespace msi
+{
+  class Mat;
+  class Vec;
+}
 typedef msi::Mat msi_mat;
 typedef msi::Vec msi_vec;
 #endif

@@ -12,20 +12,26 @@
 #define MSI_HEADER_H
 #include "msi_types.h"
 // enums used in the API
+#ifdef __cplusplus
+extern "C" {
+#endif
 enum msi_fld_tp { MSI_SUPPORT_FIELD = 0, MSI_SOLUTION_FIELD = 1, MSI_FIELD_TYPES = 2 };
 enum msi_num_tp { MSI_DOF_NUMBERING = 0, MSI_NODE_NUMBERING = 1, MSI_NUM_TYPES = 2 };
-void msi_start(msi_msh * msh);
-void msi_finalize(msi_msh * msh);
+void msi_start();
+void msi_finalize();
 // mesh api
 int msi_mesh_dim(msi_msh * msh);
 int msi_count_local_ents(msi_msh * msh, int dm);
 msi_ent * msi_get_local_ent(msi_msh * msh, int dm, int idx);
+int msi_get_ent_id(msi_msh * msh, msi_ent * ent);
+void msi_get_adjacent(msi_msh * msh, msi_ent * ent, int adj_dim, msi_ent ** adj);
+void msi_get_geom_class(msi_msh * msh, msi_ent * ent, int * mdl_dim, int * mdl_id);
 // field api
 msi_fld * msi_create_field(msi_msh * msh, const char * nm, int cmps, int ord);
 void msi_destroy_field(msi_fld * fld);
 msi_num * msi_number_field(msi_fld * fld, msi_num_tp tp);
 int msi_count_components(msi_fld * fld);
-// x = ax .+ b (element-wise)
+// x = ax .+ b (per-dof)
 void msi_field_axpb(MSI_SCALAR a, msi_fld * x, MSI_SCALAR b);
 // y = ax + y (y != y)
 void msi_field_axpy(MSI_SCALAR a, msi_fld * x, msi_fld * y);
@@ -37,14 +43,14 @@ void msi_node_dof_range(msi_fld * fld, msi_ent * ent, int nd, int * frst, int * 
 void msi_set_node_vals(msi_fld * fld, msi_ent * ent, int nd, MSI_SCALAR * dofs);
 void msi_get_node_vals(msi_fld * fld, msi_ent * ent, int nd, MSI_SCALAR * dofs);
 void msi_local_node_range(msi_fld * num, int * frst, int * lst_p1);
-void msi_local_node_count(msi_fld * num, int * cnt);
+int msi_local_node_count(msi_fld * num);
 void msi_global_node_range(msi_fld * num, int * frst, int * lst_p1);
 void msi_global_node_count(msi_fld * num, int * cnt);
 // dof api
 void msi_local_dof_range(msi_num * num, int * frst, int * lst_p1);
-void msi_local_dof_count(msi_num * num, int * cnt);
+int msi_local_dof_count(msi_num * num);
 void msi_global_dof_range(msi_num * num, int * frst, int * lst_p1);
-void msi_global_dof_count(msi_num * num, int * cnt);
+int msi_global_dof_count(msi_num * num);
 // las api
 msi_mat * msi_create_matrix(msi_num * num);
 msi_vec * msi_create_vector(msi_num * num);
@@ -69,5 +75,8 @@ void msi_vec_as_field_storage(msi_vec * vec, msi_fld * fld);
 void msi_vec_array_field_storage(msi_vec * vec, msi_num * num, msi_fld * fld);
 void msi_vec_array_field_activate_vec(msi_fld * fld);
 void msi_vec_array_field_activate_field(msi_fld * fld);
+#ifdef __cplusplus
+}
+#endif
 #endif
 
